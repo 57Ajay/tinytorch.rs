@@ -68,45 +68,17 @@ impl Tensor {
     }
 
     pub fn mul(&self, other: &Tensor) -> Tensor {
-        assert!(self.shape.1 == other.shape.0);
-
-        // outout tensor row and col
-        let or = self.shape.0;
-        let oc = other.shape.1;
-
-        let mut z = or * oc;
-        let mut data = Vec::<f32>::with_capacity(z);
-
-        let mut current_self_row = 0;
-        let mut current_self_col = 0;
-        let mut current_other_row = 0;
-        let mut current_other_col = 0;
-
-        loop {
-            if z <= 0 {
-                break;
-            }
-
-            let mut v = 0.0;
-
-            for _ in 0..oc {
-                v += self.data[current_self_row * self.shape.1 + current_self_col]
-                    * other.data[current_other_row * other.shape.1 + current_other_col];
-
-                current_self_col += 1;
-                current_other_row += 1;
-            }
-            current_self_row += 1;
-            current_other_col += 1;
-
-            data.push(v);
-
-            z -= 1;
-        }
+        assert!(self.shape == other.shape);
+        let data = self
+            .data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(x, y)| x * y)
+            .collect::<Vec<f32>>();
 
         Self {
             data,
-            shape: (or, oc),
+            shape: (self.shape.0, other.shape.1),
         }
     }
     pub fn scale(&self, scalar: f32) -> Self {
@@ -222,5 +194,51 @@ mod test {
         let x = Tensor::zeros((3, 4));
         let b = Tensor::zeros((1, 3)); // should be (1, 4)
         let _ = x.add_bias(&b);
+    }
+
+    #[test]
+    fn test_transpose() {
+        // [[1, 2, 3],
+        //  [4, 5, 6]] (2x3)
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], (2, 3));
+        let at = a.transpose();
+
+        assert_eq!(at.shape(), (3, 2));
+        // Expected transpose:
+        // [[1, 4],
+        //  [2, 5],
+        //  [3, 6]]
+        assert_eq!(at.data, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn test_matmul() {
+        // A: (2x3)
+        // [[1, 2, 3],
+        //  [4, 5, 6]]
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], (2, 3));
+
+        // B: (3x2)
+        // [[7,  8],
+        //  [9,  1],
+        //  [2,  3]]
+        let b = Tensor::new(vec![7.0, 8.0, 9.0, 1.0, 2.0, 3.0], (3, 2));
+
+        // C = A x B: (2x2)
+        // Row 0 x Col 0 = 1*7 + 2*9 + 3*2 = 7 + 18 + 6 = 31
+        // Row 0 x Col 1 = 1*8 + 2*1 + 3*3 = 8 + 2 + 9  = 19
+        // Row 1 x Col 0 = 4*7 + 5*9 + 6*2 = 28 + 45 + 12 = 85
+        // Row 1 x Col 1 = 4*8 + 5*1 + 6*3 = 32 + 5 + 18 = 55
+        let c = a.matmul(&b);
+        assert_eq!(c.shape(), (2, 2));
+        assert_eq!(c.data, vec![31.0, 19.0, 85.0, 55.0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_matmul_shape_mismatch() {
+        let a = Tensor::zeros((2, 3));
+        let b = Tensor::zeros((4, 2)); // 3 != 4, must panic!
+        let _ = a.matmul(&b);
     }
 }
