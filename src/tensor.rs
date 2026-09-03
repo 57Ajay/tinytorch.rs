@@ -1,9 +1,11 @@
 use std::vec;
 
+use rand::RngExt;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    data: Vec<f32>,
-    shape: (usize, usize),
+    pub data: Vec<f32>,
+    pub shape: (usize, usize),
 }
 
 impl Tensor {
@@ -150,6 +152,31 @@ impl Tensor {
         }
 
         Self { data, shape }
+    }
+
+    pub fn rand_uniform(shape: (usize, usize), low: f32, high: f32) -> Self {
+        let mut data = Vec::with_capacity(shape.0 * shape.1);
+        let mut i = 0;
+        loop {
+            if i == shape.0 * shape.1 {
+                break;
+            }
+            let v = rand::rng().random_range(low..high);
+            data.push(v);
+            i += 1;
+        }
+
+        Self { data, shape }
+    }
+
+    pub fn xavier(shape: (usize, usize)) -> Self {
+        let limit = (6.0 / (shape.0 + shape.1) as f32).sqrt();
+        Self::rand_uniform(shape, -limit, limit)
+    }
+
+    pub fn he(shape: (usize, usize)) -> Self {
+        let limit = (6.0 / shape.0 as f32).sqrt();
+        Self::rand_uniform(shape, -limit, limit)
     }
 }
 
