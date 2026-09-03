@@ -69,14 +69,15 @@ impl Layer for ReLU {
 
 impl Layer for Sigmoid {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        self.output = Some(input.clone());
         let data = input
             .data
             .iter()
             .map(|x| 1.0 / (1.0 + (-x).exp()))
             .collect::<Vec<f32>>();
 
-        Tensor::new(data, input.shape)
+        let t = Tensor::new(data, input.shape);
+        self.output = Some(t.clone());
+        t
     }
 }
 
