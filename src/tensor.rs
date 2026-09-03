@@ -1,6 +1,8 @@
+use std::vec;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    pub data: Vec<f32>,
+    data: Vec<f32>,
     shape: (usize, usize),
 }
 
@@ -114,10 +116,47 @@ impl Tensor {
             shape: self.shape,
         }
     }
+
+    pub fn transpose(&self) -> Self {
+        let shape = (self.shape.1, self.shape.0);
+        let l = self.data.len();
+        let mut data = Vec::<f32>::with_capacity(l);
+
+        for c in 0..self.shape.1 {
+            for r in 0..self.shape.0 {
+                data.push(self.get(r, c));
+            }
+        }
+        Self { data, shape }
+    }
+
+    pub fn matmul(&self, other: &Self) -> Self {
+        assert!(self.shape.1 == other.shape.0);
+
+        let r = self.shape.0;
+        let c = other.shape.1;
+
+        let shape = (r, c);
+        let mut data = Vec::with_capacity(r * c);
+
+        for i in 0..r {
+            for j in 0..c {
+                let mut sum = 0.0;
+                for k in 0..self.shape.1 {
+                    sum += self.get(i, k) * other.get(k, j);
+                }
+                data.push(sum);
+            }
+        }
+
+        Self { data, shape }
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use std::{assert_eq, vec};
+
     use super::*;
 
     #[test]
@@ -240,5 +279,57 @@ mod test {
         let a = Tensor::zeros((2, 3));
         let b = Tensor::zeros((4, 2)); // 3 != 4, must panic!
         let _ = a.matmul(&b);
+    }
+
+    #[test]
+    fn test_rand_uniform() {
+        let t = Tensor::rand_uniform((10, 20), -2.0, 3.0);
+        assert_eq!(t.shape(), (10, 20));
+        assert_eq!(t.data.len(), 200);
+
+        // Check bounds
+        for &val in &t.data {
+            assert!(val >= -2.0 && val <= 3.0, "Value {} out of bounds", val);
+        }
+
+        // Check that not all elements are identical (true randomness)
+        let first = t.data[0];
+        assert!(t.data.iter().any(|&x| (x - first).abs() > 1e-5));
+    }
+
+    #[test]
+    fn test_xavier_init() {
+        // fan_in = 100, fan_out = 200
+        // limit = sqrt(6 / 300) = sqrt(0.02) ≈ 0.14142
+        let t = Tensor::xavier((100, 200));
+        assert_eq!(t.shape(), (100, 200));
+        let expected_limit = (6.0 / 300.0_f32).sqrt();
+
+        for &val in &t.data {
+            assert!(
+                val >= -expected_limit && val <= expected_limit,
+                "Value {} exceeds Xavier limit {}",
+                val,
+                expected_limit
+            );
+        }
+    }
+
+    #[test]
+    fn test_he_init() {
+        // fan_in = 100, fan_out = 200
+        // limit = sqrt(6 / 100) = sqrt(0.06) ≈ 0.24495
+        let t = Tensor::he((100, 200));
+        assert_eq!(t.shape(), (100, 200));
+        let expected_limit = (6.0 / 100.0_f32).sqrt();
+
+        for &val in &t.data {
+            assert!(
+                val >= -expected_limit && val <= expected_limit,
+                "Value {} exceeds He limit {}",
+                val,
+                expected_limit
+            );
+        }
     }
 }
