@@ -39,6 +39,47 @@ impl Layer for Linear {
     }
 }
 
+pub struct ReLU {
+    pub input: Option<Tensor>,
+}
+
+pub struct Sigmoid {
+    pub output: Option<Tensor>,
+}
+
+impl ReLU {
+    pub fn new() -> Self {
+        Self { input: None }
+    }
+}
+
+impl Sigmoid {
+    pub fn new() -> Self {
+        Self { output: None }
+    }
+}
+
+impl Layer for ReLU {
+    fn forward(&mut self, input: &Tensor) -> Tensor {
+        self.input = Some(input.clone());
+        let data = input.data.iter().map(|x| x.max(0.0)).collect::<Vec<f32>>();
+        Tensor::new(data, input.shape)
+    }
+}
+
+impl Layer for Sigmoid {
+    fn forward(&mut self, input: &Tensor) -> Tensor {
+        self.output = Some(input.clone());
+        let data = input
+            .data
+            .iter()
+            .map(|x| 1.0 / (1.0 + (-x).exp()))
+            .collect::<Vec<f32>>();
+
+        Tensor::new(data, input.shape)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::{assert_eq, vec};
@@ -85,5 +126,31 @@ mod test {
         // Passed 4 features when layer expects 3
         let x = Tensor::ones((2, 4));
         let _ = layer.forward(&x);
+    }
+
+    #[test]
+    fn test_relu_forward() {
+        let mut relu = ReLU::new();
+        // Shape (2, 3) with negative, zero, and positive values
+        let x = Tensor::new(vec![-3.0, -0.5, 0.0, 1.5, 2.0, -10.0], (2, 3));
+        let out = relu.forward(&x);
+
+        assert_eq!(out.shape(), (2, 3));
+        assert_eq!(out.data, vec![0.0, 0.0, 0.0, 1.5, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn test_sigmoid_forward() {
+        let mut sigmoid = Sigmoid::new();
+        let x = Tensor::new(vec![0.0, 2.0, -2.0], (1, 3));
+        let out = sigmoid.forward(&x);
+
+        assert_eq!(out.shape(), (1, 3));
+        // sigma(0) = 0.5
+        assert!((out.data[0] - 0.5).abs() < 1e-5);
+        // sigma(2) ≈ 0.880797
+        assert!((out.data[1] - 0.880797).abs() < 1e-5);
+        // sigma(-2) ≈ 0.119203
+        assert!((out.data[2] - 0.119203).abs() < 1e-5);
     }
 }
