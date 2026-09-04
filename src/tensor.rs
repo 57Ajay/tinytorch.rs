@@ -178,6 +178,23 @@ impl Tensor {
         let limit = (6.0 / shape.0 as f32).sqrt();
         Self::rand_uniform(shape, -limit, limit)
     }
+
+    pub fn sum_axis0(&self) -> Self {
+        let mut data = Vec::<f32>::with_capacity(self.shape.1);
+
+        for i in 0..self.shape.1 {
+            let mut sum = 0.0;
+            for j in 0..self.shape.0 {
+                sum += self.get(j, i);
+            }
+            data.push(sum);
+        }
+
+        Self {
+            data,
+            shape: (1, self.shape.1),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -358,5 +375,18 @@ mod test {
                 expected_limit
             );
         }
+    }
+
+    #[test]
+    fn test_sum_axis0() {
+        // (3, 2)
+        // [[1.0, 2.0],
+        //  [3.0, 4.0],
+        //  [5.0, 6.0]]
+        // sum_axis0 -> [[9.0, 12.0]] shape (1, 2)
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], (3, 2));
+        let s = t.sum_axis0();
+        assert_eq!(s.shape(), (1, 2));
+        assert_eq!(s.data, vec![9.0, 12.0]);
     }
 }

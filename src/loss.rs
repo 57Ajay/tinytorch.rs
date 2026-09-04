@@ -4,20 +4,63 @@ pub trait Loss {
     fn forward(&self, pred: &Tensor, target: &Tensor) -> f32;
 }
 
-// =========================================================================
-// PADAWAN: Implement `MSELoss` and `BCELoss` below!
-//
-// 1. MSELoss:
-//    L = (1 / M) * sum((pred_i - target_i)^2)
-//    where M is total elements (pred.data.len()).
-//
-// 2. BCELoss:
-//    L = - (1 / M) * sum( target_i * ln(pred_i + eps) + (1 - target_i) * ln(1 - pred_i + eps) )
-//    Use eps = 1e-7 to prevent ln(0).
-// =========================================================================
+#[derive(Default)]
+pub struct MSELoss;
+
+impl MSELoss {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Loss for MSELoss {
+    fn forward(&self, pred: &Tensor, target: &Tensor) -> f32 {
+        assert!(pred.shape == target.shape);
+
+        let m = pred.data.len();
+        let mut loss = pred
+            .data
+            .iter()
+            .zip(target.data.iter())
+            .map(|(p, t)| (p - t).powf(2.0))
+            .sum::<f32>();
+        loss /= m as f32;
+
+        loss
+    }
+}
+
+#[derive(Default)]
+pub struct BCELoss;
+
+impl BCELoss {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Loss for BCELoss {
+    fn forward(&self, pred: &Tensor, target: &Tensor) -> f32 {
+        assert!(pred.shape == target.shape);
+        let esp = 1e-7_f32;
+        let m = pred.data.len();
+
+        let mut loss = pred
+            .data
+            .iter()
+            .zip(target.data.iter())
+            .map(|(p, t)| -(t * (p + esp).ln() + (1.0 - t) * (1.0 - p + esp).ln()))
+            .sum::<f32>();
+
+        loss /= m as f32;
+        loss
+    }
+}
 
 #[cfg(test)]
 mod test {
+    use std::{assert_eq, vec};
+
     use super::*;
 
     #[test]
