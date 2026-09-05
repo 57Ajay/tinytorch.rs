@@ -3,6 +3,8 @@ use crate::tensor::Tensor;
 pub trait Layer {
     fn forward(&mut self, input: &Tensor) -> Tensor;
     fn backward(&mut self, grad_output: &Tensor) -> Tensor;
+    fn update(&mut self, _lr: f32) {}
+    fn zero_grad(&mut self) {}
 }
 
 pub struct Linear {
@@ -49,6 +51,19 @@ impl Layer for Linear {
         self.d_bias = Some(grad_output.sum_axis0());
 
         grad_output.matmul(&self.weights.transpose())
+    }
+
+    fn update(&mut self, _lr: f32) {
+        self.weights = self
+            .weights
+            .sub(&self.d_weights.as_ref().unwrap().scale(_lr));
+
+        self.bias = self.bias.sub(&self.d_bias.as_ref().unwrap().scale(_lr));
+    }
+
+    fn zero_grad(&mut self) {
+        self.d_weights = None;
+        self.d_bias = None;
     }
 }
 
@@ -268,5 +283,183 @@ mod test {
         let db = linear.d_bias.as_ref().unwrap();
         assert_eq!(db.shape(), (1, 1));
         assert_eq!(db.data, vec![3.0]);
+    }
+
+    #[test]
+    fn test_numerical_gradient_check_linear() {
+        use crate::loss::{Loss, MSELoss};
+
+        let x = Tensor::new(vec![1.5, -0.5, 2.0, 1.0], (2, 2));
+        let target = Tensor::new(vec![0.8, 1.2], (2, 1));
+
+        let weights = Tensor::new(vec![0.4, -0.7], (2, 1));
+        let bias = Tensor::new(vec![0.2], (1, 1));
+
+        let mut layer = Linear::from_weights(weights, bias);
+        let loss_fn = MSELoss::new();
+
+        // 1. Analytical backward pass
+        let pred = layer.forward(&x);
+        let loss_grad = loss_fn.backward(&pred, &target);
+        let _ = layer.backward(&loss_grad);
+
+        let analytical_dw = layer.d_weights.as_ref().unwrap().clone();
+        let analytical_db = layer.d_bias.as_ref().unwrap().clone();
+
+        let eps = 1e-3_f32;
+
+        // 2. Numerical gradient check for weights
+        for i in 0..layer.weights.data.len() {
+            let orig = layer.weights.data[i];
+
+            layer.weights.data[i] = orig + eps;
+            let pred_pos = layer.forward(&x);
+            let loss_pos = loss_fn.forward(&pred_pos, &target);
+
+            layer.weights.data[i] = orig - eps;
+            let pred_neg = layer.forward(&x);
+            let loss_neg = loss_fn.forward(&pred_neg, &target);
+
+            layer.weights.data[i] = orig;
+
+            let num_grad = (loss_pos - loss_neg) / (2.0 * eps);
+            let ana_grad = analytical_dw.data[i];
+
+            let diff = (num_grad - ana_grad).abs();
+            let norm = num_grad.abs().max(ana_grad.abs()).max(1e-6);
+            let rel_error = diff / norm;
+
+            assert!(
+                rel_error < 1e-3,
+                "Weight gradient check failed at index {}: numerical = {}, analytical = {}, rel_error = {}",
+                i,
+                num_grad,
+                ana_grad,
+                rel_error
+            );
+        }
+
+        // 3. Numerical gradient check for bias
+        for i in 0..layer.bias.data.len() {
+            let orig = layer.bias.data[i];
+
+            layer.bias.data[i] = orig + eps;
+            let pred_pos = layer.forward(&x);
+            let loss_pos = loss_fn.forward(&pred_pos, &target);
+
+            layer.bias.data[i] = orig - eps;
+            let pred_neg = layer.forward(&x);
+            let loss_neg = loss_fn.forward(&pred_neg, &target);
+
+            layer.bias.data[i] = orig;
+
+            let num_grad = (loss_pos - loss_neg) / (2.0 * eps);
+            let ana_grad = analytical_db.data[i];
+
+            let diff = (num_grad - ana_grad).abs();
+            let norm = num_grad.abs().max(ana_grad.abs()).max(1e-6);
+            let rel_error = diff / norm;
+
+            assert!(
+                rel_error < 1e-3,
+                "Bias gradient check failed at index {}: numerical = {}, analytical = {}, rel_error = {}",
+                i,
+                num_grad,
+                ana_grad,
+                rel_error
+            );
+        }
+    }
+
+    #[test]
+    fn test_numerical_gradient_check_two_layer() {
+        use crate::loss::{Loss, MSELoss};
+
+        // Two layer chain: Linear -> Sigmoid -> MSELoss
+        let x = Tensor::new(vec![0.5, -0.2, 0.1, 0.8], (2, 2));
+        let target = Tensor::new(vec![0.7, 0.3], (2, 1));
+
+        let weights = Tensor::new(vec![0.6, -0.4], (2, 1));
+        let bias = Tensor::new(vec![0.1], (1, 1));
+
+        let mut linear = Linear::from_weights(weights, bias);
+        let mut sigmoid = Sigmoid::new();
+        let loss_fn = MSELoss::new();
+
+        // Forward
+        let a1 = linear.forward(&x);
+        let pred = sigmoid.forward(&a1);
+
+        // Backward
+        let loss_grad = loss_fn.backward(&pred, &target);
+        let grad_a1 = sigmoid.backward(&loss_grad);
+        let _ = linear.backward(&grad_a1);
+
+        let analytical_dw = linear.d_weights.as_ref().unwrap().clone();
+        let analytical_db = linear.d_bias.as_ref().unwrap().clone();
+
+        let eps = 1e-3_f32;
+
+        // Check weights
+        for i in 0..linear.weights.data.len() {
+            let orig = linear.weights.data[i];
+
+            linear.weights.data[i] = orig + eps;
+            let p_pos = sigmoid.forward(&linear.forward(&x));
+            let l_pos = loss_fn.forward(&p_pos, &target);
+
+            linear.weights.data[i] = orig - eps;
+            let p_neg = sigmoid.forward(&linear.forward(&x));
+            let l_neg = loss_fn.forward(&p_neg, &target);
+
+            linear.weights.data[i] = orig;
+
+            let num_grad = (l_pos - l_neg) / (2.0 * eps);
+            let ana_grad = analytical_dw.data[i];
+
+            let diff = (num_grad - ana_grad).abs();
+            let norm = num_grad.abs().max(ana_grad.abs()).max(1e-6);
+            let rel_error = diff / norm;
+
+            assert!(
+                rel_error < 1e-3,
+                "Two-layer weight gradient failed at index {}: num = {}, ana = {}, rel_err = {}",
+                i,
+                num_grad,
+                ana_grad,
+                rel_error
+            );
+        }
+
+        // Check bias
+        for i in 0..linear.bias.data.len() {
+            let orig = linear.bias.data[i];
+
+            linear.bias.data[i] = orig + eps;
+            let p_pos = sigmoid.forward(&linear.forward(&x));
+            let l_pos = loss_fn.forward(&p_pos, &target);
+
+            linear.bias.data[i] = orig - eps;
+            let p_neg = sigmoid.forward(&linear.forward(&x));
+            let l_neg = loss_fn.forward(&p_neg, &target);
+
+            linear.bias.data[i] = orig;
+
+            let num_grad = (l_pos - l_neg) / (2.0 * eps);
+            let ana_grad = analytical_db.data[i];
+
+            let diff = (num_grad - ana_grad).abs();
+            let norm = num_grad.abs().max(ana_grad.abs()).max(1e-6);
+            let rel_error = diff / norm;
+
+            assert!(
+                rel_error < 1e-3,
+                "Two-layer bias gradient failed at index {}: num = {}, ana = {}, rel_err = {}",
+                i,
+                num_grad,
+                ana_grad,
+                rel_error
+            );
+        }
     }
 }

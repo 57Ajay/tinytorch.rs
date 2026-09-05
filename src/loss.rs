@@ -2,6 +2,7 @@ use crate::tensor::Tensor;
 
 pub trait Loss {
     fn forward(&self, pred: &Tensor, target: &Tensor) -> f32;
+    fn backward(&self, pred: &Tensor, target: &Tensor) -> Tensor;
 }
 
 #[derive(Default)]
@@ -27,6 +28,20 @@ impl Loss for MSELoss {
         loss /= m as f32;
 
         loss
+    }
+
+    fn backward(&self, pred: &Tensor, target: &Tensor) -> Tensor {
+        let shape = target.shape;
+        let m = pred.data.len() as f32;
+
+        let data = pred
+            .data
+            .iter()
+            .zip(target.data.iter())
+            .map(|(p, t)| (2.0 / m) * (p - t))
+            .collect::<Vec<f32>>();
+
+        Tensor::new(data, shape)
     }
 }
 
@@ -54,6 +69,21 @@ impl Loss for BCELoss {
 
         loss /= m as f32;
         loss
+    }
+
+    fn backward(&self, pred: &Tensor, target: &Tensor) -> Tensor {
+        let eps = 1e-7_f32;
+        let m = pred.data.len() as f32;
+        let shape = pred.shape;
+
+        let data = pred
+            .data
+            .iter()
+            .zip(target.data.iter())
+            .map(|(p, t)| (1.0 / m) * ((p - t) / ((p + eps) * (1.0 - p + eps))))
+            .collect::<Vec<f32>>();
+
+        Tensor::new(data, shape)
     }
 }
 
@@ -104,5 +134,37 @@ mod test {
         let pred = Tensor::zeros((2, 2));
         let target = Tensor::zeros((3, 2));
         let _ = mse.forward(&pred, &target);
+    }
+
+    #[test]
+    fn test_mse_loss_backward() {
+        let mse = MSELoss::new();
+        let pred = Tensor::new(vec![2.0, 5.0], (2, 1));
+        let target = Tensor::new(vec![1.0, 3.0], (2, 1));
+
+        // M = 2
+        // dL/dp_0 = 2/2 * (2 - 1) = 1.0
+        // dL/dp_1 = 2/2 * (5 - 3) = 2.0
+        let grad = mse.backward(&pred, &target);
+        assert_eq!(grad.shape(), (2, 1));
+        assert_eq!(grad.data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_bce_loss_backward() {
+        let bce = BCELoss::new();
+        let pred = Tensor::new(vec![0.8, 0.2], (2, 1));
+        let target = Tensor::new(vec![1.0, 0.0], (2, 1));
+
+        // M = 2
+        // For element 0: target = 1.0, pred = 0.8
+        // dL/dp = (1/M) * (pred - target) / (pred * (1 - pred))
+        //       = 0.5 * (0.8 - 1.0) / (0.8 * 0.2) = 0.5 * (-0.2) / 0.16 = -0.625
+        // For element 1: target = 0.0, pred = 0.2
+        // dL/dp = 0.5 * (0.2 - 0.0) / (0.2 * 0.8) = 0.5 * (0.2) / 0.16 = 0.625
+        let grad = bce.backward(&pred, &target);
+        assert_eq!(grad.shape(), (2, 1));
+        assert!((grad.data[0] - (-0.625)).abs() < 1e-4);
+        assert!((grad.data[1] - 0.625).abs() < 1e-4);
     }
 }
