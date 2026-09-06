@@ -1,3 +1,7 @@
+use std::assert_eq;
+use std::fs::File;
+use std::io::Write;
+
 use crate::layer::Layer;
 use crate::tensor::Tensor;
 
@@ -46,6 +50,44 @@ impl Sequential {
         for layer in self.layers.iter_mut() {
             layer.update_adam(lr, beta1, beta2, eps);
         }
+    }
+
+    pub fn save_weights(&self, path: &str) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+        for layer in &self.layers {
+            for param in layer.get_params() {
+                file.write_all(&(param.shape.0 as u32).to_le_bytes())?;
+                file.write_all(&(param.shape.1 as u32).to_le_bytes())?;
+
+                for &val in &param.data {
+                    file.write_all(&val.to_le_bytes())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn load_weights(&mut self, path: &str) -> std::io::Result<()> {
+        let bytes = std::fs::read(path)?;
+        let mut offset = 0;
+        for layer in self.layers.iter_mut() {
+            for param in layer.get_params_mut() {
+                let rows =
+                    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+                let cols =
+                    u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+                offset += 8;
+                assert_eq!(param.shape, (rows, cols), "Model architecture mismatch!");
+
+                let count = rows * cols;
+                for i in 0..count {
+                    param.data[i] =
+                        f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+                    offset += 4;
+                }
+            }
+        }
+        Ok(())
     }
 }
 #[cfg(test)]

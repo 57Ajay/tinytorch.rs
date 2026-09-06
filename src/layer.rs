@@ -1,3 +1,5 @@
+use std::vec;
+
 use crate::tensor::Tensor;
 
 pub trait Layer {
@@ -6,6 +8,13 @@ pub trait Layer {
     fn update(&mut self, _lr: f32) {}
     fn zero_grad(&mut self) {}
     fn update_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _eps: f32) {}
+
+    fn get_params(&self) -> Vec<&Tensor> {
+        vec![]
+    }
+    fn get_params_mut(&mut self) -> Vec<&mut Tensor> {
+        vec![]
+    }
 }
 
 pub struct Linear {
@@ -134,6 +143,14 @@ impl Layer for Linear {
             let delta = (lr * m_hat) / (v_hat.sqrt() + eps);
             self.bias.data[i] -= delta;
         }
+    }
+
+    fn get_params(&self) -> Vec<&Tensor> {
+        vec![&self.weights, &self.bias]
+    }
+
+    fn get_params_mut(&mut self) -> Vec<&mut Tensor> {
+        vec![&mut self.weights, &mut self.bias]
     }
 }
 
