@@ -195,6 +195,28 @@ impl Tensor {
             shape: (1, self.shape.1),
         }
     }
+
+    pub fn slice_rows(&self, start: usize, end: usize) -> Self {
+        assert!(start <= end && end <= self.shape.0);
+
+        let s = start * self.shape.1;
+        let e = end * self.shape.1;
+        let data = self.data[s..e].to_vec();
+        Self::new(data, (end - start, self.shape.1))
+    }
+
+    pub fn get_rows(&self, indices: &[usize]) -> Tensor {
+        let c = self.shape.1;
+        let l = indices.len();
+        let mut data = Vec::<f32>::with_capacity(indices.len() * c);
+
+        for i in indices {
+            let s = i * c;
+            let e = s + c;
+            data.extend_from_slice(&self.data[s..e]);
+        }
+        Self::new(data, (l, c))
+    }
 }
 
 #[cfg(test)]
@@ -388,5 +410,39 @@ mod test {
         let s = t.sum_axis0();
         assert_eq!(s.shape(), (1, 2));
         assert_eq!(s.data, vec![9.0, 12.0]);
+    }
+
+    #[test]
+    fn test_slice_rows() {
+        // 4 rows, 2 cols
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], (4, 2));
+
+        // Slice rows 1..3 (rows 1 and 2: [3, 4] and [5, 6])
+        let sliced = t.slice_rows(1, 3);
+        assert_eq!(sliced.shape(), (2, 2));
+        assert_eq!(sliced.data, vec![3.0, 4.0, 5.0, 6.0]);
+
+        // Slice single row 0..1
+        let single = t.slice_rows(0, 1);
+        assert_eq!(single.shape(), (1, 2));
+        assert_eq!(single.data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_get_rows() {
+        // 4 rows, 2 cols
+        let t = Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0], (4, 2));
+
+        // Reorder rows: [3, 0, 2]
+        let selected = t.get_rows(&[3, 0, 2]);
+        assert_eq!(selected.shape(), (3, 2));
+        assert_eq!(
+            selected.data,
+            vec![
+                70.0, 80.0, // row 3
+                10.0, 20.0, // row 0
+                50.0, 60.0, // row 2
+            ]
+        );
     }
 }

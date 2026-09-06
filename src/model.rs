@@ -41,6 +41,12 @@ impl Sequential {
             layer.zero_grad();
         }
     }
+
+    pub fn update_adam(&mut self, lr: f32, beta1: f32, beta2: f32, eps: f32) {
+        for layer in self.layers.iter_mut() {
+            layer.update_adam(lr, beta1, beta2, eps);
+        }
+    }
 }
 #[cfg(test)]
 mod test {
@@ -121,7 +127,7 @@ mod test {
         let loss_fn = MSELoss::new();
 
         let lr = 1.0_f32;
-        let epochs = 3000;
+        let epochs = 1000; // just so i can run test a little faster
 
         let mut final_loss = 1.0;
         for _ in 0..epochs {

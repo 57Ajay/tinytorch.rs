@@ -5,6 +5,7 @@ pub trait Layer {
     fn backward(&mut self, grad_output: &Tensor) -> Tensor;
     fn update(&mut self, _lr: f32) {}
     fn zero_grad(&mut self) {}
+    fn update_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _eps: f32) {}
 }
 
 pub struct Linear {
@@ -13,6 +14,13 @@ pub struct Linear {
     pub input: Option<Tensor>,
     pub d_weights: Option<Tensor>,
     pub d_bias: Option<Tensor>,
+
+    // these are all for adam optemizer
+    pub m_weights: Option<Tensor>,
+    pub v_weights: Option<Tensor>,
+    pub m_bias: Option<Tensor>,
+    pub v_bias: Option<Tensor>,
+    pub t: usize,
 }
 
 impl Linear {
@@ -26,6 +34,11 @@ impl Linear {
             input: None,
             d_weights: None,
             d_bias: None,
+            m_weights: None,
+            v_weights: None,
+            m_bias: None,
+            v_bias: None,
+            t: 0,
         }
     }
     pub fn from_weights(weights: Tensor, bias: Tensor) -> Self {
@@ -36,6 +49,11 @@ impl Linear {
             input: None,
             d_weights: None,
             d_bias: None,
+            m_weights: None,
+            v_weights: None,
+            m_bias: None,
+            v_bias: None,
+            t: 0,
         }
     }
 }
@@ -64,6 +82,58 @@ impl Layer for Linear {
     fn zero_grad(&mut self) {
         self.d_weights = None;
         self.d_bias = None;
+    }
+
+    #[allow(clippy::needless_range_loop)]
+    fn update_adam(&mut self, lr: f32, beta1: f32, beta2: f32, eps: f32) {
+        self.t += 1;
+
+        if self.m_weights.is_none() {
+            self.m_weights = Some(Tensor::zeros(self.weights.shape));
+        }
+        if self.v_weights.is_none() {
+            self.v_weights = Some(Tensor::zeros(self.weights.shape));
+        }
+        if self.m_bias.is_none() {
+            self.m_bias = Some(Tensor::zeros(self.bias.shape));
+        }
+        if self.v_bias.is_none() {
+            self.v_bias = Some(Tensor::zeros(self.bias.shape));
+        }
+
+        let bias_correction1 = 1.0 - beta1.powi(self.t as i32);
+        let bias_correction2 = 1.0 - beta2.powi(self.t as i32);
+
+        let dw = &self.d_weights.as_ref().expect("d_weights missing").data;
+        let db = &self.d_bias.as_ref().expect("d_bias missing").data;
+
+        let mw = self.m_weights.as_mut().unwrap();
+        let vw = self.v_weights.as_mut().unwrap();
+
+        for i in 0..self.weights.data.len() {
+            mw.data[i] = beta1 * mw.data[i] + (1.0 - beta1) * dw[i];
+            vw.data[i] = beta2 * vw.data[i] + (1.0 - beta2) * dw[i].powi(2);
+
+            let m_hat = mw.data[i] / bias_correction1;
+            let v_hat = vw.data[i] / bias_correction2;
+
+            let delta = (lr * m_hat) / (v_hat.sqrt() + eps);
+            self.weights.data[i] -= delta;
+        }
+
+        let mb = self.m_bias.as_mut().unwrap();
+        let vb = self.v_bias.as_mut().unwrap();
+
+        for i in 0..self.bias.data.len() {
+            mb.data[i] = beta1 * mb.data[i] + (1.0 - beta1) * db[i];
+            vb.data[i] = beta2 * vb.data[i] + (1.0 - beta2) * db[i].powi(2);
+
+            let m_hat = mb.data[i] / bias_correction1;
+            let v_hat = vb.data[i] / bias_correction2;
+
+            let delta = (lr * m_hat) / (v_hat.sqrt() + eps);
+            self.bias.data[i] -= delta;
+        }
     }
 }
 
@@ -132,6 +202,76 @@ impl Layer for Sigmoid {
             .collect();
 
         Tensor::new(data, grad_output.shape)
+    }
+}
+
+#[derive(Default)]
+pub struct Softmax {
+    pub output: Option<Tensor>,
+}
+
+impl Softmax {
+    pub fn new() -> Self {
+        Self { output: None }
+    }
+}
+
+impl Layer for Softmax {
+    fn forward(&mut self, input: &Tensor) -> Tensor {
+        let mut output = Vec::<f32>::with_capacity(input.data.len());
+
+        let c = input.shape.1;
+        let r_ = input.shape.0;
+
+        for r in 0..r_ {
+            let mut r_vec = Vec::with_capacity(c);
+            let mut m = input.get(r, 0);
+            let mut sum = 0.0;
+
+            for j in 0..c {
+                let v = input.get(r, j);
+                if v > m {
+                    m = v;
+                }
+                r_vec.push(v);
+            }
+
+            for v in r_vec.iter_mut() {
+                *v = (*v - m).exp();
+                sum += *v;
+            }
+
+            for v in r_vec {
+                output.push(v / sum);
+            }
+        }
+
+        let tensor = Tensor::new(output, input.shape);
+        self.output = Some(tensor.clone());
+        tensor
+    }
+
+    fn backward(&mut self, grad_output: &Tensor) -> Tensor {
+        let p = self.output.as_ref().unwrap();
+
+        let (r, c) = grad_output.shape;
+        let mut data = Vec::<f32>::with_capacity(r * c);
+
+        for i in 0..r {
+            let mut row_sum = 0.0;
+            for j in 0..c {
+                row_sum += p.get(i, j) * grad_output.get(i, j);
+            }
+
+            for j in 0..c {
+                let p_ij = p.get(i, j);
+                let g_ij = grad_output.get(i, j);
+                let grad = p_ij * (g_ij - row_sum);
+                data.push(grad);
+            }
+        }
+
+        Tensor::new(data, (r, c))
     }
 }
 
@@ -461,5 +601,74 @@ mod test {
                 rel_error
             );
         }
+    }
+
+    #[test]
+    fn test_softmax_forward_basic() {
+        let mut softmax = Softmax::new();
+        // Shape (2, 3)
+        let x = Tensor::new(vec![1.0, 2.0, 3.0, 0.0, 0.0, 0.0], (2, 3));
+        let out = softmax.forward(&x);
+
+        assert_eq!(out.shape(), (2, 3));
+
+        // Check row 0: sum should be 1.0, and out[0, 2] > out[0, 1] > out[0, 0]
+        let sum_row0 = out.get(0, 0) + out.get(0, 1) + out.get(0, 2);
+        assert!((sum_row0 - 1.0).abs() < 1e-5);
+        assert!(out.get(0, 2) > out.get(0, 1) && out.get(0, 1) > out.get(0, 0));
+
+        // Check row 1: equal inputs [0, 0, 0] should produce equal probabilities [1/3, 1/3, 1/3]
+        let sum_row1 = out.get(1, 0) + out.get(1, 1) + out.get(1, 2);
+        assert!((sum_row1 - 1.0).abs() < 1e-5);
+        assert!((out.get(1, 0) - 1.0 / 3.0).abs() < 1e-5);
+        assert!((out.get(1, 1) - 1.0 / 3.0).abs() < 1e-5);
+        assert!((out.get(1, 2) - 1.0 / 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_softmax_numerical_stability() {
+        let mut softmax = Softmax::new();
+        // Large values that would overflow exp() without max subtraction!
+        let x = Tensor::new(vec![1000.0, 1001.0, 1002.0], (1, 3));
+        let out = softmax.forward(&x);
+
+        // Check no NaNs or Infs
+        for &val in &out.data {
+            assert!(
+                f32::is_finite(val),
+                "Softmax output must be finite, got {}",
+                val
+            );
+        }
+
+        // Sum must still be 1.0
+        let sum: f32 = out.data.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
+
+        // Relative ratios: exp(1002 - 1002)=1.0, exp(1001 - 1002)=e^-1, exp(1000 - 1002)=e^-2
+        let e2 = (-2.0_f32).exp();
+        let e1 = (-1.0_f32).exp();
+        let e0 = 1.0_f32;
+        let expected_sum = e2 + e1 + e0;
+        assert!((out.get(0, 0) - e2 / expected_sum).abs() < 1e-5);
+        assert!((out.get(0, 1) - e1 / expected_sum).abs() < 1e-5);
+        assert!((out.get(0, 2) - e0 / expected_sum).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_softmax_backward() {
+        let mut softmax = Softmax::new();
+        let x = Tensor::new(vec![0.0, 0.0], (1, 2));
+        let _ = softmax.forward(&x); // p = [0.5, 0.5]
+
+        let grad_output = Tensor::new(vec![1.0, 0.0], (1, 2));
+        let grad_input = softmax.backward(&grad_output);
+
+        // S = grad_0 * p_0 + grad_1 * p_1 = 1.0*0.5 + 0.0*0.5 = 0.5
+        // grad_in_0 = p_0 * (grad_0 - S) = 0.5 * (1.0 - 0.5) = 0.25
+        // grad_in_1 = p_1 * (grad_1 - S) = 0.5 * (0.0 - 0.5) = -0.25
+        assert_eq!(grad_input.shape(), (1, 2));
+        assert!((grad_input.get(0, 0) - 0.25).abs() < 1e-5);
+        assert!((grad_input.get(0, 1) - (-0.25)).abs() < 1e-5);
     }
 }
