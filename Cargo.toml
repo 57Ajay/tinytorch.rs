@@ -4,4 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+image = "0.25.10"
 rand = "0.10.2"
+
+[[example]]
+name = "train_mnist"
+path = "examples/train_mnist.rs"
+
+[[example]]
+name = "predict"
+path = "examples/predict.rs"
